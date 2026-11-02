@@ -27,3 +27,9 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "aws_profile" {
+  description = "AWS CLI profile to use. Leave null in CI to use environment credentials."
+  type        = string
+  default     = "terraform"
+}
