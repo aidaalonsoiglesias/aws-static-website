@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.3"
+  required_version = ">= 1.10" # use_lockfile requires 1.10+
 
   required_providers {
     aws = {
@@ -7,6 +7,15 @@ terraform {
       version = "~> 5.0"
     }
   }
+  
+  backend "s3" {
+    bucket       = "terraform-state-bucket-20261102"
+    key          = "static-website/terraform.tfstate"
+    region       = "us-west-2"
+    encrypt      = true
+    use_lockfile = true
+  }
+
 }
 
 provider "aws" {
