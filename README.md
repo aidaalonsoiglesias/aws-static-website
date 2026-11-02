@@ -50,7 +50,7 @@ terraform destroy
 
 The GitHub Actions workflow [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) publishes the website files to S3:
 
-- **Triggers:** a push to `main` that changes files in `website/`, or a manual run from the Actions tab.
+- **Triggers:** any push to `main`, or a manual run from the Actions tab.
 - **Action:** `aws s3 sync website/ s3://static-website-dev-061700273493 --delete`. Files removed from `website/` are also removed from the bucket.
 - **Scope:** the workflow only deploys site content. Infrastructure changes are still applied locally with `terraform apply`, because Terraform state is stored locally and is not available in CI.
 
