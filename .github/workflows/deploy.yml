@@ -18,25 +18,8 @@ env:
   AWS_REGION: us-west-2
 
 jobs:
-  changes:
-    runs-on: ubuntu-latest
-    outputs:
-      infrastructure: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.infrastructure == 'true' }}
-      website: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.website == 'true' }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
-        id: filter
-        with:
-          filters: |
-            infrastructure:
-              - 'infrastructure/**'
-            website:
-              - 'website/**'
-
-  terraform:
-    needs: changes
-    if: needs.changes.outputs.infrastructure == 'true'
+  infrastructure-deploy:
+    name: Infrastructure deploy
     runs-on: ubuntu-latest
     env:
       TF_VAR_aws_profile: ""
@@ -46,22 +29,38 @@ jobs:
         working-directory: infrastructure
     steps:
       - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
-      - run: terraform fmt -check -recursive
-      - run: terraform init
-      - run: terraform validate
-      - run: terraform plan -out=tfplan
-      - run: terraform apply tfplan
+      - uses: dorny/paths-filter@v3
+        id: changed
+        with:
+          filters: |
+            infra:
+              - 'infrastructure/**'
+      # Manual runs have no diff, so they always deploy.
+      - if: github.event_name == 'workflow_dispatch' || steps.changed.outputs.infra == 'true'
+        uses: hashicorp/setup-terraform@v3
+      - if: github.event_name == 'workflow_dispatch' || steps.changed.outputs.infra == 'true'
+        run: |
+          terraform fmt -check -recursive
+          terraform init
+          terraform validate
+          terraform plan -out=tfplan
+          terraform apply tfplan
 
-  website:
-    needs: [changes, terraform]
-    # Runs after terraform when it ran; still runs if terraform was skipped, never if it failed.
-    if: >-
-      !cancelled() && !failure() &&
-      needs.changes.outputs.website == 'true'
+  s3-deploy:
+    name: S3 deploy
+    needs: infrastructure-deploy
+    # Runs after infrastructure deploy, but not if it failed.
+    if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-latest
     env:
       BUCKET: static-website-dev-061700273493
     steps:
       - uses: actions/checkout@v4
-      - run: aws s3 sync website/ s3://$BUCKET --delete
+      - uses: dorny/paths-filter@v3
+        id: changed
+        with:
+          filters: |
+            website:
+              - 'website/**'
+      - if: github.event_name == 'workflow_dispatch' || steps.changed.outputs.website == 'true'
+        run: aws s3 sync website/ s3://$BUCKET --delete

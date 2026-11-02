@@ -14,61 +14,108 @@ flowchart TD
 
 The website is served directly from S3. Terraform is used to provision and manage the AWS resources.
 
-## How to run
+## Project layout
 
-**Prerequisites:** AWS CLI v2 and Terraform >= 1.10.
+| Path | Purpose |
+|---|---|
+| `website/` | Static site files (uploaded to S3) |
+| `infrastructure/` | Terraform configuration (S3 bucket, public access settings, bucket policy, website config) |
+| `.github/workflows/deploy.yml` | CI/CD workflow |
 
-1. Configure AWS credentials:
+## Deploying
+
+There are two ways to deploy. Day to day, use CI/CD. Use the local route for the first setup or when you want to try something by hand.
+
+### Option 1: CI/CD (recommended)
+
+1. Edit files in `website/` and/or `infrastructure/`.
+2. Commit and push to `main`.
+3. The workflow deploys only what changed (see [CI/CD](#cicd)). Follow progress in the repository's **Actions** tab.
+
+To redeploy everything without a code change, use **Actions → CI/CD → Run workflow**.
+
+### Option 2: Run locally
+
+**Prerequisites:** AWS CLI v2, Terraform >= 1.10, and an existing S3 bucket for Terraform state (`terraform-state-bucket-20261102`, configured in [`infrastructure/main.tf`](infrastructure/main.tf)).
+
+1. Configure AWS credentials under the `terraform` profile:
 
 ```bash
 aws configure --profile terraform
 ```
 
-2. Initialize and deploy:
+2. Initialize Terraform and review the plan:
 
 ```bash
 cd infrastructure
-AWS_PROFILE=terraform terraform init
-AWS_PROFILE=terraform terraform apply
+export AWS_PROFILE=terraform   # the backend needs this; it can't read Terraform variables
+terraform init
+terraform plan
 ```
 
-3. Get the website URL:
+3. Apply:
+
+```bash
+terraform apply
+```
+
+This creates the bucket and uploads everything in `website/`.
+
+4. Get the website URL:
 
 ```bash
 terraform output -raw website_url
 ```
 
-4. To update the website, edit files in `website/` and push to `main` (see [CI/CD](#cicd)), or run `terraform apply` again.
-
-5. To remove the infrastructure:
+5. Update the website. Either re-run `terraform apply` (it re-uploads changed files), or sync directly:
 
 ```bash
+aws s3 sync website/ s3://static-website-dev-061700273493 --delete --profile terraform
+```
+
+6. Preview the site locally before deploying (no AWS needed):
+
+```bash
+cd website
+python3 -m http.server 8000   # open http://localhost:8000
+```
+
+7. Remove everything:
+
+```bash
+cd infrastructure
 terraform destroy
 ```
 
+If you applied earlier with local state, run `terraform init -migrate-state` once to move it into the S3 backend.
+
+### Configuration
+
+Defaults live in [`infrastructure/variables.tf`](infrastructure/variables.tf). Override with `-var` or a `terraform.tfvars` file (git-ignored).
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `aws_region` | `us-west-2` | Region for the bucket |
+| `aws_profile` | `terraform` | AWS CLI profile (CI sets it empty) |
+| `project_name` | `static-website` | Bucket name prefix and `Project` tag |
+| `environment` | `dev` | Bucket name part and `Environment` tag |
+| `website_dir` | `../website` | Folder uploaded to S3 |
+| `tags` | `{}` | Extra tags on all resources |
+
+The bucket name is `<project_name>-<environment>-<account-id>`. If you change it, update `BUCKET` in the workflow and in the commands above.
+
 ## CI/CD
 
-A single workflow, [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml), runs on every push to `main` and can also be started manually from the Actions tab (`workflow_dispatch`, which runs both parts).
+One workflow, [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml), runs on pushes to `main` (or manually from the Actions tab) with two jobs:
 
-```mermaid
-flowchart LR
-    C[changes] -->|infrastructure/** changed| T[terraform]
-    C -->|website/** changed| W[website]
-    T --> W
-```
+| Job | Runs when | What it does |
+|---|---|---|
+| Infrastructure deploy | `infrastructure/**` changed | Terraform `fmt -check`, `init`, `validate`, `plan`, `apply` |
+| S3 deploy | `website/**` changed | `aws s3 sync website/ s3://static-website-dev-061700273493 --delete` |
 
-| Changed | Result |
-|---|---|
-| `website/` only | Sync website to S3 |
-| `infrastructure/` only | Terraform `fmt -check`, `init`, `validate`, `plan`, `apply` |
-| Both | Terraform first, then website sync |
-| Neither | Everything skipped |
+If neither folder changed, nothing is deployed. If both changed, infrastructure deploys first, and S3 deploy is skipped if it fails. Manual runs execute both. The S3 sync removes files from the bucket that were deleted from `website/`.
 
-- **Change detection:** the `changes` job uses `dorny/paths-filter`.
-- **Ordering:** the `website` job waits for `terraform` and does not run if it fails.
-- **Website deploy:** `aws s3 sync website/ s3://static-website-dev-061700273493 --delete`. Files removed from `website/` are also removed from the bucket.
 - **Terraform state:** stored remotely in the S3 backend configured in [`infrastructure/main.tf`](infrastructure/main.tf) (bucket `terraform-state-bucket-20261102`, with encryption and S3 lock file). CI sets `TF_VAR_aws_profile=""` so it uses the secrets instead of the local `terraform` profile.
-- **Local runs:** the backend can't use the `aws_profile` variable, so prefix commands with `AWS_PROFILE=terraform`. If you applied with local state before, run `terraform init -migrate-state` once.
 
 **Required repository secrets** (Settings → Secrets and variables → Actions):
 
