@@ -38,13 +38,32 @@ terraform apply
 terraform output -raw website_url
 ```
 
-4. To update the website, edit files in `website/` and run `terraform apply` again.
+4. To update the website, edit files in `website/` and push to `main` (see [CI/CD](#cicd)), or run `terraform apply` again.
 
 5. To remove the infrastructure:
 
 ```bash
 terraform destroy
 ```
+
+## CI/CD
+
+The GitHub Actions workflow [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) publishes the website files to S3:
+
+- **Triggers:** a push to `main` that changes files in `website/`, or a manual run from the Actions tab.
+- **Action:** `aws s3 sync website/ s3://static-website-dev-061700273493 --delete`. Files removed from `website/` are also removed from the bucket.
+- **Scope:** the workflow only deploys site content. Infrastructure changes are still applied locally with `terraform apply`, because Terraform state is stored locally and is not available in CI.
+
+**Required repository secrets** (Settings → Secrets and variables → Actions):
+
+| Secret | Purpose |
+|---|---|
+| `AWS_ACCESS_KEY_ID` | Access key of a dedicated IAM user |
+| `AWS_SECRET_ACCESS_KEY` | Secret for that access key |
+
+The IAM user should have least-privilege access: `s3:ListBucket` on the bucket, and `s3:PutObject` and `s3:DeleteObject` on `bucket/*`.
+
+If you change `project_name`, `environment` or the region, update `BUCKET` and `AWS_REGION` in the workflow to match.
 
 ## Notes
 
